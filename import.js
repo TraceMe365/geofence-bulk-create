@@ -15,6 +15,9 @@
  *   node wialon-import-geofences.js <csv-file> --token=<wialon-token> --resource=<resourceId> [--url=<base-url>]
  *
  * Requires Node 18+ (uses global fetch).
+ * Example Command:
+ * node wialon-import-geofences.js Book1.csv --token=ABC123 --resource=29982789 
+ * Token can be created using the following URL: https://hosting.wialon.com/login.html?access_type=1024
  */
 
 const fs = require("fs");
