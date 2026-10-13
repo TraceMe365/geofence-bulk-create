@@ -91,9 +91,11 @@ export default function Home() {
 
   function signIn() {
     setAuthError("");
+    // 0x100 (online tracking: view resources/geofences) + 0x400 (edit non-sensitive
+    // data: create/edit/delete geofences) — not -1 (full account access).
     const params = new URLSearchParams({
       client_id: "Geofence Bulk Importer",
-      access_type: "-1",
+      access_type: "1280",
       activation_time: "0",
       duration: "3600",
       flags: "1",
@@ -343,7 +345,8 @@ export default function Home() {
           )}
           {authError && <div className="err-text" style={{ marginTop: 6 }}>{authError}</div>}
           <div className="hint">
-            The account needs geofence create/edit rights on the resource (not just view).
+            The account needs geofence create/edit rights on the resource (not just view). The
+            generated session only requests geofence view/edit access, not full account access.
           </div>
         </div>
 
