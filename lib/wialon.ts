@@ -1,6 +1,7 @@
 import type { Zone } from "./types";
 
 export const DEFAULT_BASE_URL = "https://hst-api.wialon.com/wialon/ajax.html";
+export const DEFAULT_LOGIN_URL = "https://hosting.wialon.com/login.html";
 
 export function argbColor(r: number, g: number, b: number, opacityPercent: number): number {
   const alpha = Math.round((opacityPercent / 100) * 255);
@@ -54,6 +55,41 @@ export async function login(baseUrl: string, token: string): Promise<string> {
     throw new Error(`Login failed: ${JSON.stringify(data)}`);
   }
   return data.eid;
+}
+
+export interface ResourceOption {
+  id: number;
+  name: string;
+}
+
+export async function searchResources(baseUrl: string, sid: string): Promise<ResourceOption[]> {
+  const body = new URLSearchParams();
+  body.set("svc", "core/search_items");
+  body.set(
+    "params",
+    JSON.stringify({
+      spec: { itemsType: "avl_resource", propName: "sys_name", propValueMask: "*", sortType: "sys_name" },
+      force: 1,
+      flags: 1,
+      from: 0,
+      to: 0xffffffff,
+    })
+  );
+  body.set("sid", sid);
+
+  const data = (await postForm(baseUrl, body)) as { items?: { id: number; nm: string }[]; error?: number };
+  if (!data || !Array.isArray(data.items)) {
+    throw new Error(`Failed to load resources: ${JSON.stringify(data)}`);
+  }
+  return data.items.map((item) => ({ id: item.id, name: item.nm }));
+}
+
+export async function logout(baseUrl: string, sid: string): Promise<void> {
+  const body = new URLSearchParams();
+  body.set("svc", "core/logout");
+  body.set("params", "{}");
+  body.set("sid", sid);
+  await postForm(baseUrl, body).catch(() => undefined);
 }
 
 export async function sendBatch(

@@ -44,7 +44,9 @@ export async function POST(req: Request) {
   const batchSize = Math.min(Math.max(Number(body.batchSize) || 100, 1), MAX_BATCH_SIZE);
   const zones = Array.isArray(body.zones) ? body.zones.filter(isZone) : [];
 
-  if (!token) return Response.json({ error: "Missing token." }, { status: 400 });
+  if (!token) {
+    return Response.json({ error: "Missing token." }, { status: 400 });
+  }
   if (!resourceId || Number.isNaN(resourceId)) {
     return Response.json({ error: "Missing or invalid resourceId." }, { status: 400 });
   }

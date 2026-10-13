@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { csvToZones } from "@/lib/csv";
-import { argbColor, DEFAULT_BASE_URL } from "@/lib/wialon";
+import { argbColor, DEFAULT_BASE_URL, DEFAULT_LOGIN_URL } from "@/lib/wialon";
 import type { Zone, BatchEvent } from "@/lib/types";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
@@ -16,7 +16,14 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
 
 export default function Home() {
   const [token, setToken] = useState("");
+  const [userName, setUserName] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
+  const [loginUrl, setLoginUrl] = useState(DEFAULT_LOGIN_URL);
   const [resourceId, setResourceId] = useState("");
+  const [resources, setResources] = useState<{ id: number; name: string }[]>([]);
+  const [resourcesLoading, setResourcesLoading] = useState(false);
+  const [resourcesError, setResourcesError] = useState("");
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [defaultRadius, setDefaultRadius] = useState(100);
   const [colorHex, setColorHex] = useState("#c991e4");
@@ -39,6 +46,83 @@ export default function Home() {
     const { r, g, b } = hexToRgb(colorHex);
     return argbColor(r, g, b, opacity);
   }, [colorHex, opacity]);
+
+  const loadResources = useCallback(
+    async (authToken: string) => {
+      if (!authToken) return;
+      setResourcesLoading(true);
+      setResourcesError("");
+      setResources([]);
+      setResourceId("");
+      try {
+        const res = await fetch("/api/resources", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: authToken, baseUrl }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load resources.");
+        const loaded: { id: number; name: string }[] = data.resources || [];
+        setResources(loaded);
+        if (loaded.length === 0) setResourcesError("No resources found for this account.");
+      } catch (err) {
+        setResourcesError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setResourcesLoading(false);
+      }
+    },
+    [baseUrl]
+  );
+
+  function signIn() {
+    setAuthError("");
+    const params = new URLSearchParams({
+      client_id: "Geofence Bulk Importer",
+      access_type: "-1",
+      activation_time: "0",
+      duration: "3600",
+      flags: "1",
+      redirect_uri: `${window.location.origin}/auth/callback`,
+      response_type: "token",
+    });
+    const popup = window.open(
+      `${loginUrl}?${params.toString()}`,
+      "wialon_login",
+      "width=480,height=640"
+    );
+    if (!popup) {
+      setAuthError("Popup blocked. Allow popups for this site and try again.");
+      return;
+    }
+    setSigningIn(true);
+  }
+
+  function signOut() {
+    setToken("");
+    setUserName("");
+    setResources([]);
+    setResourceId("");
+    setResourcesError("");
+  }
+
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data;
+      if (!data || data.source !== "wialon-auth") return;
+      setSigningIn(false);
+      if (data.accessToken) {
+        setToken(data.accessToken);
+        setUserName(data.userName || "");
+        setAuthError("");
+        loadResources(data.accessToken);
+      } else {
+        setAuthError(data.error || "Sign-in failed.");
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [loadResources]);
 
   function handleFile(file: File) {
     setFileName(file.name);
@@ -151,8 +235,7 @@ export default function Home() {
   }
 
   function resetAll() {
-    setToken("");
-    setResourceId("");
+    signOut();
     setZones([]);
     setWarnings([]);
     setParseError("");
@@ -171,38 +254,71 @@ export default function Home() {
       <p className="subtitle">Bulk-create circular geofences in Wialon from a CSV file.</p>
 
       <div className="notice">
-        Your token and CSV data are sent once to this app&apos;s serverless endpoint, forwarded
-        directly to Wialon&apos;s API for this request, and are never written to disk, a database,
-        or logs. Nothing is stored between visits — refreshing the page clears everything.
+        Signing in opens Wialon&apos;s own login page in a popup. Your credentials go directly to
+        Wialon, never to this app — it only receives a short-lived session token back, which is
+        sent once to this app&apos;s serverless endpoint per action and never written to disk, a
+        database, or logs. Nothing is stored between visits — refreshing the page clears
+        everything.
       </div>
 
       <div className="panel">
         <div className="field">
-          <label htmlFor="token">Wialon API token</label>
-          <input
-            id="token"
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Paste your Wialon token"
-            autoComplete="off"
-          />
+          <label>Wialon account</label>
+          {token ? (
+            <div className="auth-status">
+              <span className="auth-dot" />
+              <span>Signed in{userName ? ` as ${userName}` : ""}</span>
+              <button type="button" className="secondary" onClick={signOut}>
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <div className="auth-status">
+              <button type="button" onClick={signIn} disabled={signingIn}>
+                {signingIn ? "Waiting for sign-in…" : "Sign in with Wialon"}
+              </button>
+            </div>
+          )}
+          {authError && <div className="err-text" style={{ marginTop: 6 }}>{authError}</div>}
           <div className="hint">
-            Create one at hosting.wialon.com with geofence create/edit rights (not just view).
+            The account needs geofence create/edit rights on the resource (not just view).
           </div>
         </div>
 
         <div className="row">
           <div className="field">
-            <label htmlFor="resource">Resource ID</label>
-            <input
-              id="resource"
-              type="text"
-              inputMode="numeric"
-              value={resourceId}
-              onChange={(e) => setResourceId(e.target.value.replace(/[^0-9]/g, ""))}
-              placeholder="e.g. 29982789"
-            />
+            <label htmlFor="resource">Resource</label>
+            <div className="select-row">
+              <div className="select-wrap">
+                <select
+                  id="resource"
+                  value={resourceId}
+                  onChange={(e) => setResourceId(e.target.value)}
+                  disabled={resources.length === 0}
+                >
+                  <option value="">
+                    {resources.length === 0 ? "Load resources to select…" : "Select a resource…"}
+                  </option>
+                  {resources.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} ({r.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => loadResources(token)}
+                disabled={!token || resourcesLoading}
+              >
+                {resourcesLoading ? "Loading…" : resources.length > 0 ? "Reload" : "Load resources"}
+              </button>
+            </div>
+            {resourcesError && <div className="err-text" style={{ marginTop: 4 }}>{resourcesError}</div>}
+            {!resourcesError && !token && (
+              <div className="hint">Sign in above, then load your resources.</div>
+            )}
           </div>
           <div className="field">
             <label htmlFor="baseUrl">API base URL</label>
@@ -223,10 +339,27 @@ export default function Home() {
             }}
           />
           {fileName && <div className="hint">Loaded: {fileName}</div>}
+          <div className="hint">
+            <a href="/sample.csv" download>
+              Download sample CSV
+            </a>
+          </div>
         </div>
 
         <details>
           <summary>Advanced options</summary>
+          <div className="row">
+            <div className="field">
+              <label htmlFor="loginUrl">Wialon login page URL</label>
+              <input
+                id="loginUrl"
+                type="text"
+                value={loginUrl}
+                onChange={(e) => setLoginUrl(e.target.value)}
+              />
+              <div className="hint">Change this if you use a private Wialon server.</div>
+            </div>
+          </div>
           <div className="row">
             <div className="field">
               <label htmlFor="radius">Default radius (m)</label>
