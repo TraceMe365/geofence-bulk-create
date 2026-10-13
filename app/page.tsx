@@ -1,9 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import { csvToZones } from "@/lib/csv";
 import { argbColor, DEFAULT_BASE_URL, DEFAULT_LOGIN_URL } from "@/lib/wialon";
 import type { Zone, BatchEvent } from "@/lib/types";
+
+interface Geofence {
+  id: number;
+  name: string;
+  type: number;
+  lat: number | null;
+  lng: number | null;
+  radius: number | null;
+}
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const clean = hex.replace("#", "");
@@ -15,6 +25,7 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
 }
 
 export default function Home() {
+  const [tab, setTab] = useState<"import" | "view">("import");
   const [token, setToken] = useState("");
   const [userName, setUserName] = useState("");
   const [authError, setAuthError] = useState("");
@@ -39,6 +50,10 @@ export default function Home() {
   const [log, setLog] = useState<string[]>([]);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [summary, setSummary] = useState<{ created: number; failed: number; total: number; failures: { name: string; error: unknown }[] } | null>(null);
+
+  const [geofences, setGeofences] = useState<Geofence[]>([]);
+  const [geofencesLoading, setGeofencesLoading] = useState(false);
+  const [geofencesError, setGeofencesError] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -103,6 +118,8 @@ export default function Home() {
     setResources([]);
     setResourceId("");
     setResourcesError("");
+    setGeofences([]);
+    setGeofencesError("");
   }
 
   useEffect(() => {
@@ -123,6 +140,11 @@ export default function Home() {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [loadResources]);
+
+  useEffect(() => {
+    setGeofences([]);
+    setGeofencesError("");
+  }, [resourceId]);
 
   function handleFile(file: File) {
     setFileName(file.name);
@@ -234,6 +256,44 @@ export default function Home() {
     URL.revokeObjectURL(url);
   }
 
+  async function loadGeofences() {
+    if (!token || !resourceId) return;
+    setGeofencesLoading(true);
+    setGeofencesError("");
+    setGeofences([]);
+    try {
+      const res = await fetch("/api/zones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, resourceId: Number(resourceId), baseUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load geofences.");
+      const loaded: Geofence[] = data.zones || [];
+      setGeofences(loaded);
+      if (loaded.length === 0) setGeofencesError("No geofences found on this resource.");
+    } catch (err) {
+      setGeofencesError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGeofencesLoading(false);
+    }
+  }
+
+  function downloadGeofencesExcel() {
+    if (geofences.length === 0) return;
+    const rows = geofences.map((z) => ({
+      Name: z.name,
+      Latitude: z.lat,
+      Longitude: z.lng,
+      "Radius (m)": z.radius,
+    }));
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Geofences");
+    const resourceLabel = resources.find((r) => String(r.id) === resourceId)?.name || resourceId;
+    XLSX.writeFile(workbook, `geofences-${resourceLabel}.xlsx`);
+  }
+
   function resetAll() {
     signOut();
     setZones([]);
@@ -243,6 +303,8 @@ export default function Home() {
     setLog([]);
     setSummary(null);
     setProgress({ done: 0, total: 0 });
+    setGeofences([]);
+    setGeofencesError("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -250,8 +312,8 @@ export default function Home() {
 
   return (
     <div className="wrap">
-      <h1>Wialon Geofence Bulk Importer</h1>
-      <p className="subtitle">Bulk-create circular geofences in Wialon from a CSV file.</p>
+      <h1>Wialon Geofence Manager</h1>
+      <p className="subtitle">Bulk-create geofences from a CSV, or view and export existing ones to Excel.</p>
 
       <div className="notice">
         Signing in opens Wialon&apos;s own login page in a popup. Your credentials go directly to
@@ -326,6 +388,43 @@ export default function Home() {
           </div>
         </div>
 
+        <details>
+          <summary>Advanced options</summary>
+          <div className="row">
+            <div className="field">
+              <label htmlFor="loginUrl">Wialon login page URL</label>
+              <input
+                id="loginUrl"
+                type="text"
+                value={loginUrl}
+                onChange={(e) => setLoginUrl(e.target.value)}
+              />
+              <div className="hint">Change this if you use a private Wialon server.</div>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div className="tabs">
+        <button
+          type="button"
+          className={tab === "import" ? "tab active" : "tab"}
+          onClick={() => setTab("import")}
+        >
+          Import geofences
+        </button>
+        <button
+          type="button"
+          className={tab === "view" ? "tab active" : "tab"}
+          onClick={() => setTab("view")}
+        >
+          View &amp; export
+        </button>
+      </div>
+
+      {tab === "import" && (
+        <>
+      <div className="panel">
         <div className="field">
           <label htmlFor="csv">CSV file (name, latitude, longitude, radius?)</label>
           <input
@@ -348,18 +447,6 @@ export default function Home() {
 
         <details>
           <summary>Advanced options</summary>
-          <div className="row">
-            <div className="field">
-              <label htmlFor="loginUrl">Wialon login page URL</label>
-              <input
-                id="loginUrl"
-                type="text"
-                value={loginUrl}
-                onChange={(e) => setLoginUrl(e.target.value)}
-              />
-              <div className="hint">Change this if you use a private Wialon server.</div>
-            </div>
-          </div>
           <div className="row">
             <div className="field">
               <label htmlFor="radius">Default radius (m)</label>
@@ -495,6 +582,72 @@ export default function Home() {
             </button>
           )}
         </div>
+      )}
+        </>
+      )}
+
+      {tab === "view" && (
+        <>
+          <div className="panel">
+            <div className="actions" style={{ marginTop: 0 }}>
+              <button
+                type="button"
+                onClick={loadGeofences}
+                disabled={!token || !resourceId || geofencesLoading}
+              >
+                {geofencesLoading ? "Loading…" : "Load geofences"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={downloadGeofencesExcel}
+                disabled={geofences.length === 0}
+              >
+                Download as Excel
+              </button>
+            </div>
+            {geofencesError && (
+              <div className="err-text" style={{ marginTop: 8 }}>
+                {geofencesError}
+              </div>
+            )}
+            {!geofencesError && (!token || !resourceId) && (
+              <div className="hint" style={{ marginTop: 8 }}>
+                Sign in and select a resource above, then load geofences.
+              </div>
+            )}
+          </div>
+
+          {geofences.length > 0 && (
+            <div className="panel">
+              <strong>
+                {geofences.length} geofence{geofences.length === 1 ? "" : "s"}
+              </strong>
+              <div style={{ marginTop: 10, maxHeight: 420, overflowY: "auto" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Latitude</th>
+                      <th>Longitude</th>
+                      <th>Radius (m)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {geofences.map((z) => (
+                      <tr key={z.id}>
+                        <td>{z.name}</td>
+                        <td>{z.lat ?? "—"}</td>
+                        <td>{z.lng ?? "—"}</td>
+                        <td>{z.radius ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

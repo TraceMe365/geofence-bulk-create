@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Wialon Geofence Bulk Importer",
-  description: "Bulk-create circular geofences in Wialon from a CSV file.",
+  title: "Wialon Geofence Manager",
+  description: "Bulk-create geofences from a CSV, or view and export existing ones to Excel.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

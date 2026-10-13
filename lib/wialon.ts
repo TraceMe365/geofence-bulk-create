@@ -84,6 +84,38 @@ export async function searchResources(baseUrl: string, sid: string): Promise<Res
   return data.items.map((item) => ({ id: item.id, name: item.nm }));
 }
 
+export interface GeofenceRecord {
+  id: number;
+  name: string;
+  type: number;
+  lat: number | null;
+  lng: number | null;
+  radius: number | null;
+}
+
+export async function getZones(baseUrl: string, sid: string, resourceId: number): Promise<GeofenceRecord[]> {
+  const body = new URLSearchParams();
+  body.set("svc", "resource/get_zone_data");
+  body.set("params", JSON.stringify({ itemId: resourceId, flags: 0x1c }));
+  body.set("sid", sid);
+
+  const data = (await postForm(baseUrl, body)) as
+    | { n: string; id: number; t: number; w?: number; p?: { x: number; y: number; r?: number }[]; b?: { cen_x: number; cen_y: number } }[]
+    | { error?: number };
+
+  if (!Array.isArray(data)) {
+    throw new Error(`Failed to load geofences: ${JSON.stringify(data)}`);
+  }
+
+  return data.map((z) => {
+    const point = z.p && z.p.length > 0 ? z.p[0] : null;
+    const lng = point ? point.x : z.b ? z.b.cen_x : null;
+    const lat = point ? point.y : z.b ? z.b.cen_y : null;
+    const radius = point && typeof point.r === "number" ? point.r : typeof z.w === "number" ? z.w : null;
+    return { id: z.id, name: z.n, type: z.t, lat, lng, radius };
+  });
+}
+
 export async function logout(baseUrl: string, sid: string): Promise<void> {
   const body = new URLSearchParams();
   body.set("svc", "core/logout");
